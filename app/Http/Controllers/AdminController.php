@@ -298,17 +298,16 @@ class AdminController extends Controller
         }
     }
 
-    public function showInternship($id)
-    {
-        $internship = Internship::with([
-            'student',
-            'company',
-            'offer'
-        ])->findOrFail($id);
+  public function showInternship($id)
+{
+    $internship = Internship::with([
+        'student.user',   // ← ADD .user here
+        'company',
+        'offer'
+    ])->findOrFail($id);
 
-        return $this->success($internship);
-    }
-
+    return $this->success($internship);
+}
     /* =====================================================
      | VALIDATE / REJECT
      ===================================================== */
