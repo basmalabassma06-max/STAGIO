@@ -16,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
     'auth' => \Tymon\JWTAuth\Http\Middleware\Authenticate::class,
     'role' => \App\Http\Middleware\RoleMiddleware::class, 
     ]);
+    $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
 })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
