@@ -67,7 +67,10 @@ class AuthController extends Controller
         ]);
 
         // 📩 SEND EMAIL VERIFICATION
-        event(new \Illuminate\Auth\Events\Registered($user));
+        // حطي هذا
+dispatch(function () use ($user) {
+    event(new \Illuminate\Auth\Events\Registered($user));
+})->afterResponse();
 
         // ================= PROFILE =================
         if ($user->role === 'student') {
