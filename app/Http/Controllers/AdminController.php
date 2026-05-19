@@ -391,17 +391,17 @@ DB::table('documents')->insert([
             ]);
 
             try {
-                Mail::to(optional($internship->student->user)->email)
-                    ->send(new InternshipStatusMail(
-                        'validated',
-                        [
-                            storage_path("app/private/documents/$conv"),
-                            storage_path("app/private/documents/$cert")
-                        ]
-                    ));
-            } catch (\Exception $e) {
-                Log::error('Mail failed: ' . $e->getMessage());
-            }
+    Mail::to(optional($internship->student->user)->email)
+        ->later(now()->addSeconds(5), new InternshipStatusMail(
+            'validated',
+            [
+                storage_path("app/private/documents/$conv"),
+                storage_path("app/private/documents/$cert")
+            ]
+        ));
+} catch (\Exception $e) {
+    Log::error('Mail failed: ' . $e->getMessage());
+}
 
             $this->adminLog('validate_internship', $id);
 
@@ -458,11 +458,11 @@ DB::table('documents')->insert([
             ]);
 
             try {
-                Mail::to(optional($internship->student->user)->email)
-                    ->send(new InternshipStatusMail('rejected'));
-            } catch (\Exception $e) {
-                Log::error('Mail failed: ' . $e->getMessage());
-            }
+    Mail::to(optional($internship->student->user)->email)
+        ->later(now()->addSeconds(5), new InternshipStatusMail('rejected'));
+} catch (\Exception $e) {
+    Log::error('Mail failed: ' . $e->getMessage());
+}
 
             DB::commit();
 
@@ -834,11 +834,11 @@ DB::table('documents')->insert([
                 ['user_id' => $user->id]
             );
 
-            try {
-                Mail::to($user->email)->send(new CompanyApprovedMail());
-            } catch (\Exception $e) {
-                Log::error('Mail failed: ' . $e->getMessage());
-            }
+           try {
+    Mail::to($user->email)->later(now()->addSeconds(5), new CompanyApprovedMail());
+} catch (\Exception $e) {
+    Log::error('Mail failed: ' . $e->getMessage());
+}
 
             $this->adminLog('approve_company', $id);
 
@@ -871,11 +871,11 @@ DB::table('documents')->insert([
             );
 
             // FIX #13: Pass the rejection reason to the email so the company knows why
-            try {
-                Mail::to($user->email)->send(new CompanyRejectedMail($reason));
-            } catch (\Exception $e) {
-                Log::error('Mail failed: ' . $e->getMessage());
-            }
+   try {
+    Mail::to($user->email)->later(now()->addSeconds(5), new CompanyRejectedMail($reason));
+} catch (\Exception $e) {
+    Log::error('Mail failed: ' . $e->getMessage());
+}
 
             $this->adminLog('reject_company', $id, $reason);
 
