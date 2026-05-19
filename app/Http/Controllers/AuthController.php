@@ -36,7 +36,7 @@ class AuthController extends Controller
     {
         $request->validate([
             'name'     => 'required|string',
-            'email'    => 'required|email:rfc,dns|unique:users,email',
+           'email' => 'required|email|unique:users,email',
             'password' => 'required|min:6|confirmed',
             'role'     => 'required|in:student,company',
             // FIX #4: Only accept PDF for agreement (formal document)
@@ -113,7 +113,7 @@ try {
     public function login(Request $request)
     {
         $request->validate([
-            'email'    => 'required|email:rfc,dns',
+            'email'    => 'required|email',
             'password' => 'required',
         ]);
 
