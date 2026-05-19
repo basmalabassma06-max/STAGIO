@@ -45,7 +45,8 @@ Route::get('/email/verify/{id}/{hash}', function ($id, $hash) {
         event(new Verified($user));
     }
 
-    return redirect('http://localhost:5173/login?verified=1');
+    $frontendUrl = env('FRONTEND_URL', 'http://localhost:5173');
+return redirect($frontendUrl . '/login?verified=1');
 
 })->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
 /*

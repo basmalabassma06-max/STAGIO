@@ -390,13 +390,18 @@ DB::table('documents')->insert([
                 'convention_url'  => $conventionUrl,
             ]);
 
-           dispatch(function () use ($internship, $conv, $cert) {
-    Mail::to(optional($internship->student->user)->email)
-        ->send(new InternshipStatusMail('validated', [
-            storage_path("app/private/documents/$conv"),
-            storage_path("app/private/documents/$cert")
-        ]));
-})->afterResponse();
+            try {
+                Mail::to(optional($internship->student->user)->email)
+                    ->send(new InternshipStatusMail(
+                        'validated',
+                        [
+                            storage_path("app/private/documents/$conv"),
+                            storage_path("app/private/documents/$cert")
+                        ]
+                    ));
+            } catch (\Exception $e) {
+                Log::error('Mail failed: ' . $e->getMessage());
+            }
 
             $this->adminLog('validate_internship', $id);
 
@@ -829,9 +834,11 @@ DB::table('documents')->insert([
                 ['user_id' => $user->id]
             );
 
-          dispatch(function () use ($user) {
-    Mail::to($user->email)->send(new CompanyApprovedMail());
-})->afterResponse();
+            try {
+                Mail::to($user->email)->send(new CompanyApprovedMail());
+            } catch (\Exception $e) {
+                Log::error('Mail failed: ' . $e->getMessage());
+            }
 
             $this->adminLog('approve_company', $id);
 
@@ -864,9 +871,11 @@ DB::table('documents')->insert([
             );
 
             // FIX #13: Pass the rejection reason to the email so the company knows why
-            dispatch(function () use ($user, $reason) {
-    Mail::to($user->email)->send(new CompanyRejectedMail($reason));
-})->afterResponse();
+            try {
+                Mail::to($user->email)->send(new CompanyRejectedMail($reason));
+            } catch (\Exception $e) {
+                Log::error('Mail failed: ' . $e->getMessage());
+            }
 
             $this->adminLog('reject_company', $id, $reason);
 
