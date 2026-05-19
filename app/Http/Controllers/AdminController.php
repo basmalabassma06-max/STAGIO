@@ -390,18 +390,13 @@ DB::table('documents')->insert([
                 'convention_url'  => $conventionUrl,
             ]);
 
-            try {
-                Mail::to(optional($internship->student->user)->email)
-                    ->send(new InternshipStatusMail(
-                        'validated',
-                        [
-                            storage_path("app/private/documents/$conv"),
-                            storage_path("app/private/documents/$cert")
-                        ]
-                    ));
-            } catch (\Exception $e) {
-                Log::error('Mail failed: ' . $e->getMessage());
-            }
+           dispatch(function () use ($internship, $conv, $cert) {
+    Mail::to(optional($internship->student->user)->email)
+        ->send(new InternshipStatusMail('validated', [
+            storage_path("app/private/documents/$conv"),
+            storage_path("app/private/documents/$cert")
+        ]));
+})->afterResponse();
 
             $this->adminLog('validate_internship', $id);
 
@@ -834,11 +829,9 @@ DB::table('documents')->insert([
                 ['user_id' => $user->id]
             );
 
-            try {
-                Mail::to($user->email)->send(new CompanyApprovedMail());
-            } catch (\Exception $e) {
-                Log::error('Mail failed: ' . $e->getMessage());
-            }
+          dispatch(function () use ($user) {
+    Mail::to($user->email)->send(new CompanyApprovedMail());
+})->afterResponse();
 
             $this->adminLog('approve_company', $id);
 
@@ -871,11 +864,9 @@ DB::table('documents')->insert([
             );
 
             // FIX #13: Pass the rejection reason to the email so the company knows why
-            try {
-                Mail::to($user->email)->send(new CompanyRejectedMail($reason));
-            } catch (\Exception $e) {
-                Log::error('Mail failed: ' . $e->getMessage());
-            }
+            dispatch(function () use ($user, $reason) {
+    Mail::to($user->email)->send(new CompanyRejectedMail($reason));
+})->afterResponse();
 
             $this->adminLog('reject_company', $id, $reason);
 
