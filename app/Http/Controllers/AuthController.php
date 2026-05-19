@@ -36,7 +36,7 @@ class AuthController extends Controller
     {
         $request->validate([
             'name'     => 'required|string',
-           'email' => 'required|email|unique:users,email',
+            'email'    => 'required|email:rfc,dns|unique:users,email',
             'password' => 'required|min:6|confirmed',
             'role'     => 'required|in:student,company',
             // FIX #4: Only accept PDF for agreement (formal document)
@@ -68,11 +68,10 @@ class AuthController extends Controller
 
         // 📩 SEND EMAIL VERIFICATION
         // حطي هذا
-try {
+dispatch(function () use ($user) {
     event(new \Illuminate\Auth\Events\Registered($user));
-} catch (\Exception $e) {
-    Log::error('Verification email failed: ' . $e->getMessage());
-}
+})->afterResponse();
+
         // ================= PROFILE =================
         if ($user->role === 'student') {
             Student::create([
@@ -113,7 +112,7 @@ try {
     public function login(Request $request)
     {
         $request->validate([
-            'email'    => 'required|email',
+            'email'    => 'required|email:rfc,dns',
             'password' => 'required',
         ]);
 
