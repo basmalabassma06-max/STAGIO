@@ -68,8 +68,11 @@ class AuthController extends Controller
 
         // 📩 SEND EMAIL VERIFICATION
         // حطي هذا
-event(new \Illuminate\Auth\Events\Registered($user));
-
+try {
+    event(new \Illuminate\Auth\Events\Registered($user));
+} catch (\Exception $e) {
+    Log::error('Verification email failed: ' . $e->getMessage());
+}
         // ================= PROFILE =================
         if ($user->role === 'student') {
             Student::create([
