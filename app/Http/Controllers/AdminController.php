@@ -23,6 +23,26 @@ use App\Http\Controllers\Controller;
 
 class AdminController extends Controller
 {
+    // ✅ Brevo API helper
+    private function sendBrevoMail($toEmail, $toName, $subject, $htmlContent)
+    {
+        try {
+            $config = \SendinBlue\Client\Configuration::getDefaultConfiguration()
+                ->setApiKey('api-key', config('services.brevo.key'));
+            $api = new \SendinBlue\Client\Api\TransactionalEmailsApi(
+                new \GuzzleHttp\Client(), $config
+            );
+            $api->sendTransacEmail(new \SendinBlue\Client\Model\SendSmtpEmail([
+                'subject'     => $subject,
+                'htmlContent' => $htmlContent,
+                'sender'      => ['name' => config('app.name'), 'email' => config('mail.from.address')],
+                'to'          => [['email' => $toEmail, 'name' => $toName]],
+            ]));
+        } catch (\Exception $e) {
+            Log::error('Brevo mail failed: ' . $e->getMessage());
+        }
+    }
+
     private function notify($userId, $type, $message, $data = [])
     {
         try {
@@ -37,10 +57,6 @@ class AdminController extends Controller
             Log::error('Notification Error: ' . $e->getMessage());
         }
     }
-
-    /* =====================================================
-     | RESPONSE HELPERS
-     ===================================================== */
 
     private function success($data = [], $message = 'Success', $code = 200)
     {
@@ -76,30 +92,29 @@ class AdminController extends Controller
     }
 
     private function universityInfo()
-{
-    $logoPath = public_path('logo.png');
-    $logo = null;
+    {
+        $logoPath = public_path('logo.png');
+        $logo = null;
 
-    if (file_exists($logoPath)) {
-        try {
-            $type = pathinfo($logoPath, PATHINFO_EXTENSION);
-            $data = file_get_contents($logoPath);
-
-            if ($data !== false) {
-                $logo = 'data:image/' . $type . ';base64,' . base64_encode($data);
+        if (file_exists($logoPath)) {
+            try {
+                $type = pathinfo($logoPath, PATHINFO_EXTENSION);
+                $data = file_get_contents($logoPath);
+                if ($data !== false) {
+                    $logo = 'data:image/' . $type . ';base64,' . base64_encode($data);
+                }
+            } catch (\Exception $e) {
+                $logo = null;
             }
-        } catch (\Exception $e) {
-            $logo = null;
         }
-    }
 
-    return [
-        'name'       => 'Université Ferhat Abbas Sétif 1',
-        'faculty'    => 'Faculté des Sciences',
-        'department' => 'Informatique',
-        'logo'       => $logo
-    ];
-}
+        return [
+            'name'       => 'Université Ferhat Abbas Sétif 1',
+            'faculty'    => 'Faculté des Sciences',
+            'department' => 'Informatique',
+            'logo'       => $logo
+        ];
+    }
 
     /* =====================================================
      | AUTH
@@ -123,7 +138,6 @@ class AdminController extends Controller
             return $this->error('Unauthorized', 403);
         }
 
-        // FIX #1: Verify email before allowing admin login
         if (!$user->email_verified_at) {
             auth()->logout();
             return $this->error('Email not verified.', 403);
@@ -145,9 +159,7 @@ class AdminController extends Controller
     public function logout()
     {
         auth()->logout();
-
         $this->adminLog('logout');
-
         return $this->success([], 'Logout successful');
     }
 
@@ -173,33 +185,29 @@ class AdminController extends Controller
 
             return $this->success([
                 'stats' => [
-                    'students'            => $students,
-                    'companies'           => $companies,
-                    'admins'              => $admins,
-                    'validated'           => $validated,
-                    'pending'             => $pending,
-                    'rejected'            => $rejected,
-                    'total'               => $total,
-                    'placement_rate'      => $placementRate,
-                    'unplaced_students'   => max($students - $validated, 0),
-                    'pending_companies'   => User::where('role', 'company')
+                    'students'          => $students,
+                    'companies'         => $companies,
+                    'admins'            => $admins,
+                    'validated'         => $validated,
+                    'pending'           => $pending,
+                    'rejected'          => $rejected,
+                    'total'             => $total,
+                    'placement_rate'    => $placementRate,
+                    'unplaced_students' => max($students - $validated, 0),
+                    'pending_companies' => User::where('role', 'company')
                         ->where('status', User::STATUS_PENDING)->count(),
                 ],
-
                 'monthly' => Internship::selectRaw("
                     DATE_FORMAT(created_at,'%Y-%m') as month,
                     COUNT(*) as total
                 ")->groupBy('month')->orderBy('month')->get(),
 
-                'top_companies' => Internship::select(
-                    'company_id',
-                    DB::raw('COUNT(*) as total')
-                )
-                ->with('company:id,name')
-                ->groupBy('company_id')
-                ->orderByDesc('total')
-                ->limit(5)
-                ->get()
+                'top_companies' => Internship::select('company_id', DB::raw('COUNT(*) as total'))
+                    ->with('company:id,name')
+                    ->groupBy('company_id')
+                    ->orderByDesc('total')
+                    ->limit(5)
+                    ->get()
             ]);
         } catch (\Exception $e) {
             Log::error($e->getMessage());
@@ -220,48 +228,34 @@ class AdminController extends Controller
                 'offer:id,title'
             ]);
 
-            if ($request->filled('status')) {
-                $query->where('status', $request->status);
-            }
+            if ($request->filled('status'))    $query->where('status', $request->status);
+            if ($request->filled('date_from')) $query->whereDate('created_at', '>=', $request->date_from);
+            if ($request->filled('date_to'))   $query->whereDate('created_at', '<=', $request->date_to);
 
             if ($request->filled('company')) {
-                $query->whereHas('company', function ($q) use ($request) {
-                    $q->where('name', 'like', '%' . $request->company . '%');
-                });
+                $query->whereHas('company', fn($q) =>
+                    $q->where('name', 'like', '%' . $request->company . '%'));
             }
 
             if ($request->filled('student')) {
-                $query->whereHas('student', function ($q) use ($request) {
-                    $q->whereHas('user', function ($u) use ($request) {
-                        $u->where('name', 'like', '%' . $request->student . '%');
-                    });
-                });
+                $query->whereHas('student', fn($q) =>
+                    $q->whereHas('user', fn($u) =>
+                        $u->where('name', 'like', '%' . $request->student . '%')));
             }
 
             if ($request->filled('offer')) {
-                $query->whereHas('offer', function ($q) use ($request) {
-                    $q->where('title', 'like', '%' . $request->offer . '%');
-                });
-            }
-
-            if ($request->filled('date_from')) {
-                $query->whereDate('created_at', '>=', $request->date_from);
-            }
-
-            if ($request->filled('date_to')) {
-                $query->whereDate('created_at', '<=', $request->date_to);
+                $query->whereHas('offer', fn($q) =>
+                    $q->where('title', 'like', '%' . $request->offer . '%'));
             }
 
             if ($request->filled('wilaya')) {
-                $query->whereHas('student', function ($q) use ($request) {
-                    $q->where('wilaya', $request->wilaya);
-                });
+                $query->whereHas('student', fn($q) =>
+                    $q->where('wilaya', $request->wilaya));
             }
 
             if ($request->filled('type')) {
-                $query->whereHas('offer', function ($q) use ($request) {
-                    $q->where('type', $request->type);
-                });
+                $query->whereHas('offer', fn($q) =>
+                    $q->where('type', $request->type));
             }
 
             if ($request->filled('date_range')) {
@@ -274,20 +268,16 @@ class AdminController extends Controller
             if ($request->filled('search')) {
                 $search = trim($request->search);
                 $query->where(function ($q) use ($search) {
-                    $q->whereHas('student.user', function ($u) use ($search) {
-                        $u->where('name', 'like', '%' . $search . '%');
-                    });
-                    $q->orWhereHas('company', function ($c) use ($search) {
-                        $c->where('name', 'like', '%' . $search . '%');
-                    });
-                    $q->orWhereHas('offer', function ($o) use ($search) {
-                        $o->where('title', 'like', '%' . $search . '%');
-                    });
+                    $q->whereHas('student.user', fn($u) =>
+                        $u->where('name', 'like', '%' . $search . '%'))
+                      ->orWhereHas('company', fn($c) =>
+                        $c->where('name', 'like', '%' . $search . '%'))
+                      ->orWhereHas('offer', fn($o) =>
+                        $o->where('title', 'like', '%' . $search . '%'));
                 });
             }
 
             $this->adminLog('view_internships');
-
             $perPage = max(1, min($request->per_page ?? 10, 50));
 
             return $this->success($query->paginate($perPage));
@@ -298,16 +288,17 @@ class AdminController extends Controller
         }
     }
 
-  public function showInternship($id)
-{
-    $internship = Internship::with([
-        'student.user',   // ← ADD .user here
-        'company',
-        'offer'
-    ])->findOrFail($id);
+    public function showInternship($id)
+    {
+        $internship = Internship::with([
+            'student.user',
+            'company',
+            'offer'
+        ])->findOrFail($id);
 
-    return $this->success($internship);
-}
+        return $this->success($internship);
+    }
+
     /* =====================================================
      | VALIDATE / REJECT
      ===================================================== */
@@ -317,13 +308,12 @@ class AdminController extends Controller
         DB::beginTransaction();
 
         try {
-          $internship = Internship::with(['student.user', 'company', 'offer'])
-    ->findOrFail($id);
+            $internship = Internship::with(['student.user', 'company', 'offer'])->findOrFail($id);
 
-// ✅ حماية
-if (!$internship->student || !$internship->student->user) {
-    return $this->error('Student or user not found', 422);
-}
+            if (!$internship->student || !$internship->student->user) {
+                return $this->error('Student or user not found', 422);
+            }
+
             $path = storage_path('app/private/documents');
             File::ensureDirectoryExists($path);
 
@@ -339,9 +329,9 @@ if (!$internship->student || !$internship->student->user) {
             ])->save("$path/$conv");
 
             Pdf::loadView('pdf.certificate', [
-    'internship' => $internship,
-    'uni' => $this->universityInfo()
-])->save("$path/$cert");
+                'internship' => $internship,
+                'uni'        => $this->universityInfo()
+            ])->save("$path/$cert");
 
             $publicPath = storage_path('app/public/documents');
             File::ensureDirectoryExists($publicPath);
@@ -350,24 +340,25 @@ if (!$internship->student || !$internship->student->user) {
 
             $conventionUrl  = asset('storage/documents/' . $conv);
             $certificateUrl = asset('storage/documents/' . $cert);
-          DB::table('documents')->insert([
-    'internship_id' => $id,
-    'file_path'     => $conv,
-    'type'          => 'convention',
-    'generated_at'  => now(),
-    'created_at'    => now(),
-    'updated_at'    => now(),
-]);
 
-DB::table('documents')->insert([
-    'internship_id' => $id,
-    'file_path'     => $cert,
-    'type'          => 'certificate',
-    'generated_at'  => now(),
-    'created_at'    => now(),
-    'updated_at'    => now(),
-]);
-            // FIX #14: Use constants instead of string literals for status values
+            DB::table('documents')->insert([
+                'internship_id' => $id,
+                'file_path'     => $conv,
+                'type'          => 'convention',
+                'generated_at'  => now(),
+                'created_at'    => now(),
+                'updated_at'    => now(),
+            ]);
+
+            DB::table('documents')->insert([
+                'internship_id' => $id,
+                'file_path'     => $cert,
+                'type'          => 'certificate',
+                'generated_at'  => now(),
+                'created_at'    => now(),
+                'updated_at'    => now(),
+            ]);
+
             $internship->update([
                 'status'       => Internship::VALIDATED,
                 'validated_by' => Auth::id(),
@@ -390,21 +381,15 @@ DB::table('documents')->insert([
                 'convention_url'  => $conventionUrl,
             ]);
 
-            try {
-    Mail::to(optional($internship->student->user)->email)
-        ->later(now()->addSeconds(5), new InternshipStatusMail(
-            'validated',
-            [
-                storage_path("app/private/documents/$conv"),
-                storage_path("app/private/documents/$cert")
-            ]
-        ));
-} catch (\Exception $e) {
-    Log::error('Mail failed: ' . $e->getMessage());
-}
+            // ✅ Brevo API
+            $this->sendBrevoMail(
+                optional($internship->student->user)->email,
+                optional($internship->student->user)->name,
+                'Your internship has been validated ✅',
+                '<p>Congratulations! Your internship has been validated.</p>'
+            );
 
             $this->adminLog('validate_internship', $id);
-
             DB::commit();
 
             return $this->success([
@@ -423,14 +408,12 @@ DB::table('documents')->insert([
 
     public function rejectInternship(Request $request, $id)
     {
-        $request->validate([
-            'reason' => 'nullable|string|max:255'
-        ]);
+        $request->validate(['reason' => 'nullable|string|max:255']);
 
         DB::beginTransaction();
 
         try {
-            $internship = Internship::with(['student', 'company'])->findOrFail($id);
+            $internship = Internship::with(['student.user', 'company'])->findOrFail($id);
 
             if ($internship->status !== Internship::PENDING_ADMIN) {
                 return $this->error('Already processed');
@@ -438,7 +421,6 @@ DB::table('documents')->insert([
 
             $reason = $request->reason ?? 'No reason';
 
-            // FIX #14: Use constant instead of string literal
             $internship->update([
                 'status'      => Internship::REJECTED_BY_ADMIN,
                 'rejected_by' => Auth::id(),
@@ -457,15 +439,15 @@ DB::table('documents')->insert([
                 'internship_id' => $id
             ]);
 
-            try {
-    Mail::to(optional($internship->student->user)->email)
-        ->later(now()->addSeconds(5), new InternshipStatusMail('rejected'));
-} catch (\Exception $e) {
-    Log::error('Mail failed: ' . $e->getMessage());
-}
+            // ✅ Brevo API
+            $this->sendBrevoMail(
+                optional($internship->student->user)->email,
+                optional($internship->student->user)->name,
+                'Your internship has been rejected ❌',
+                '<p>Unfortunately your internship has been rejected.</p><p><b>Reason:</b> ' . $reason . '</p>'
+            );
 
             DB::commit();
-
             return $this->success([], 'Rejected');
 
         } catch (\Exception $e) {
@@ -475,22 +457,19 @@ DB::table('documents')->insert([
         }
     }
 
+    /* =====================================================
+     | USERS
+     ===================================================== */
+
     public function toggleUserStatus($id)
     {
         try {
             $user = User::findOrFail($id);
 
-            if ($user->id == Auth::id()) {
-                return $this->error('Cannot disable yourself', 403);
-            }
-
-            // FIX #7: Prevent admins from toggling other admin accounts
-            if ($user->role === 'admin') {
-                return $this->error('Cannot modify other admin accounts', 403);
-            }
+            if ($user->id == Auth::id()) return $this->error('Cannot disable yourself', 403);
+            if ($user->role === 'admin')  return $this->error('Cannot modify other admin accounts', 403);
 
             $user->update(['is_active' => !$user->is_active]);
-
             $this->adminLog('toggle_user', $id);
 
             return $this->success([], 'Updated');
@@ -504,12 +483,9 @@ DB::table('documents')->insert([
     {
         $user = User::findOrFail($id);
 
-        if ($user->role === 'admin') {
-            return $this->error('Cannot delete admin', 403);
-        }
+        if ($user->role === 'admin') return $this->error('Cannot delete admin', 403);
 
         $user->delete();
-
         $this->adminLog('delete_user', $id);
 
         return $this->success([], 'Deleted');
@@ -521,7 +497,6 @@ DB::table('documents')->insert([
 
     public function getNotifications(Request $request)
     {
-        // FIX #18: Respect per_page parameter like other paginated endpoints
         $perPage = max(1, min($request->per_page ?? 10, 50));
 
         return $this->success(
@@ -542,34 +517,22 @@ DB::table('documents')->insert([
     public function markAsRead($id)
     {
         $notif = Notification::findOrFail($id);
-
-        if ($notif->user_id != Auth::id()) {
-            return $this->error('Unauthorized', 403);
-        }
-
+        if ($notif->user_id != Auth::id()) return $this->error('Unauthorized', 403);
         $notif->update(['is_read' => true]);
-
         return $this->success([], 'Marked');
     }
 
     public function markAllRead()
     {
-        Notification::where('user_id', Auth::id())
-            ->update(['is_read' => true]);
-
+        Notification::where('user_id', Auth::id())->update(['is_read' => true]);
         return $this->success([], 'All read');
     }
 
     public function deleteNotification($id)
     {
         $notif = Notification::findOrFail($id);
-
-        if ($notif->user_id != Auth::id()) {
-            return $this->error('Unauthorized', 403);
-        }
-
+        if ($notif->user_id != Auth::id()) return $this->error('Unauthorized', 403);
         $notif->delete();
-
         return $this->success([], 'Deleted');
     }
 
@@ -577,12 +540,6 @@ DB::table('documents')->insert([
      | FILES
      ===================================================== */
 
-    /**
-     * FIX #5: Corrected regex to properly match the filenames generated
-     * by validateInternship(), which include slugified names (letters + digits).
-     * Original regex was broken: `convention|certificate_[0-9]+.pdf` treated
-     * `|` as top-level alternation and didn't match slugged names.
-     */
     private function validFile($file)
     {
         return (bool) preg_match('/^(convention|certificate)_[a-z0-9\-]+_[a-z0-9\-]+_\d+\.pdf$/', $file);
@@ -591,10 +548,7 @@ DB::table('documents')->insert([
     public function listFiles()
     {
         $path = storage_path('app/private/documents');
-
-        if (!File::exists($path)) {
-            return $this->success([]);
-        }
+        if (!File::exists($path)) return $this->success([]);
 
         $files = collect(File::files($path))
             ->map(fn($f) => $f->getFilename())
@@ -616,10 +570,7 @@ DB::table('documents')->insert([
         $user    = $student->user;
 
         if (!$student->hasDigitalCv()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Student CV incomplete'
-            ], 400);
+            return response()->json(['success' => false, 'message' => 'Student CV incomplete'], 400);
         }
 
         $pdf = Pdf::loadView('pdf.student-cv', [
@@ -633,37 +584,20 @@ DB::table('documents')->insert([
 
     public function downloadFile($file)
     {
-        if (!$this->validFile($file)) {
-            return $this->error('Invalid file', 403);
-        }
-
+        if (!$this->validFile($file)) return $this->error('Invalid file', 403);
         $path = storage_path('app/private/documents/' . $file);
-
-        if (!File::exists($path)) {
-            return $this->error('Not found', 404);
-        }
-
+        if (!File::exists($path)) return $this->error('Not found', 404);
         $this->adminLog('download_file', null, $file);
-
         return response()->download($path);
     }
 
     public function deleteFile($file)
     {
-        if (!$this->validFile($file)) {
-            return $this->error('Invalid file', 403);
-        }
-
+        if (!$this->validFile($file)) return $this->error('Invalid file', 403);
         $path = storage_path('app/private/documents/' . $file);
-
-        if (!File::exists($path)) {
-            return $this->error('Not found', 404);
-        }
-
+        if (!File::exists($path)) return $this->error('Not found', 404);
         File::delete($path);
-
         $this->adminLog('delete_file', null, $file);
-
         return $this->success([], 'Deleted');
     }
 
@@ -686,15 +620,12 @@ DB::table('documents')->insert([
                 'rejected'       => Internship::where('status', 'rejected_by_admin')->count(),
                 'total'          => Internship::count(),
                 'placement_rate' => $students > 0
-                    ? round(($validated / $students) * 100, 2)
-                    : 0,
+                    ? round(($validated / $students) * 100, 2) : 0,
                 'generated_at'   => now()
             ];
 
             $pdf = Pdf::loadView('pdf.stats', compact('data'));
-
             $this->adminLog('export_stats');
-
             return $pdf->download('admin-stats-' . date('Y-m-d') . '.pdf');
 
         } catch (\Exception $e) {
@@ -706,18 +637,14 @@ DB::table('documents')->insert([
     public function exportInternships()
     {
         try {
-            // FIX #15: Replaced ->get() with chunking to avoid memory exhaustion
-            // on large datasets. We build the PDF view data in chunks.
             $internships = Internship::with([
                 'student.user:id,name',
                 'company:id,name',
                 'offer:id,title'
-            ])->paginate(500)->items(); // Limit to 500 records per export
+            ])->paginate(500)->items();
 
             $pdf = Pdf::loadView('pdf.internships', compact('internships'));
-
             $this->adminLog('export_internships');
-
             return $pdf->download('internships-' . date('Y-m-d') . '.pdf');
 
         } catch (\Exception $e) {
@@ -732,9 +659,7 @@ DB::table('documents')->insert([
             $logs = AdminLog::with('admin:id,name')
                 ->latest()
                 ->paginate(min($request->per_page ?? 10, 50));
-
             return $this->success($logs);
-
         } catch (\Exception $e) {
             return $this->error('Failed', 500);
         }
@@ -754,11 +679,8 @@ DB::table('documents')->insert([
         $students = Student::whereDoesntHave('internships')
             ->with('user:id,name,email')
             ->paginate(10);
-
         return response()->json($students);
     }
-
-    // ================= TRACKING STATES =================
 
     public function pendingInternships()
     {
@@ -811,9 +733,7 @@ DB::table('documents')->insert([
                 ->with('company')
                 ->latest()
                 ->paginate(min($request->per_page ?? 10, 50));
-
             return $this->success($companies);
-
         } catch (\Exception $e) {
             Log::error($e->getMessage());
             return $this->error('Failed', 500);
@@ -827,21 +747,25 @@ DB::table('documents')->insert([
                 ->where('status', User::STATUS_PENDING)
                 ->findOrFail($id);
 
-            $user->update(['status' => User::STATUS_APPROVED,'email_verified_at' => now(),]);
+            $user->update([
+                'status'            => User::STATUS_APPROVED,
+                'email_verified_at' => now(),
+            ]);
 
             $this->notify($user->id, 'company_approved',
                 'Your company account has been approved! You can now log in. ✅',
                 ['user_id' => $user->id]
             );
 
-           try {
-    Mail::to($user->email)->later(now()->addSeconds(5), new CompanyApprovedMail());
-} catch (\Exception $e) {
-    Log::error('Mail failed: ' . $e->getMessage());
-}
+            // ✅ Brevo API
+            $this->sendBrevoMail(
+                $user->email,
+                $user->name,
+                'Your account has been approved ✅',
+                '<p>Congratulations! Your company account on <b>' . config('app.name') . '</b> has been approved. You can now log in.</p>'
+            );
 
             $this->adminLog('approve_company', $id);
-
             return $this->success([], 'Company approved');
 
         } catch (\Exception $e) {
@@ -852,9 +776,7 @@ DB::table('documents')->insert([
 
     public function rejectCompany(Request $request, $id)
     {
-        $request->validate([
-            'reason' => 'nullable|string|max:255'
-        ]);
+        $request->validate(['reason' => 'nullable|string|max:255']);
 
         try {
             $user = User::where('role', 'company')
@@ -870,15 +792,15 @@ DB::table('documents')->insert([
                 ['user_id' => $user->id]
             );
 
-            // FIX #13: Pass the rejection reason to the email so the company knows why
-   try {
-    Mail::to($user->email)->later(now()->addSeconds(5), new CompanyRejectedMail($reason));
-} catch (\Exception $e) {
-    Log::error('Mail failed: ' . $e->getMessage());
-}
+            // ✅ Brevo API
+            $this->sendBrevoMail(
+                $user->email,
+                $user->name,
+                'Your registration has been rejected ❌',
+                '<p>Unfortunately your company registration has been rejected.</p><p><b>Reason:</b> ' . $reason . '</p>'
+            );
 
             $this->adminLog('reject_company', $id, $reason);
-
             return $this->success([], 'Company rejected');
 
         } catch (\Exception $e) {
@@ -897,8 +819,6 @@ DB::table('documents')->insert([
                 return $this->error('No agreement file found', 404);
             }
 
-            // FIX #6: Prevent path traversal by resolving the real path and
-            // confirming it stays within the expected storage directory.
             $relativePath = ltrim($company->agreement_file, '/');
             $fullPath     = storage_path('app/private/' . $relativePath);
             $realPath     = realpath($fullPath);
@@ -909,12 +829,9 @@ DB::table('documents')->insert([
                 return $this->error('Invalid file path', 403);
             }
 
-            if (!File::exists($realPath)) {
-                return $this->error('File not found on disk', 404);
-            }
+            if (!File::exists($realPath)) return $this->error('File not found on disk', 404);
 
             $this->adminLog('download_agreement', $id);
-
             return response()->download($realPath);
 
         } catch (\Exception $e) {
@@ -922,14 +839,15 @@ DB::table('documents')->insert([
             return $this->error('Failed', 500);
         }
     }
+
     public function pendingUsers()
-{
-    return $this->success(
-        User::where('role', 'company')
-            ->where('status', User::STATUS_PENDING)
-            ->with('company')
-            ->latest()
-            ->get()
-    );
-}
+    {
+        return $this->success(
+            User::where('role', 'company')
+                ->where('status', User::STATUS_PENDING)
+                ->with('company')
+                ->latest()
+                ->get()
+        );
+    }
 }

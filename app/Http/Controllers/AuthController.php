@@ -59,13 +59,26 @@ class AuthController extends Controller
             'status'   => $status,
         ]);
 
-        // ✅ بعث إيميل التحقق بدون timeout
-        try {
-            $user->sendEmailVerificationNotification();
-        } catch (\Exception $e) {
-            \Log::error('Verification email failed: ' . $e->getMessage());
-        }
-
+       try {
+    $config = \SendinBlue\Client\Configuration::getDefaultConfiguration()
+        ->setApiKey('api-key', config('services.brevo.key'));
+    $api = new \SendinBlue\Client\Api\TransactionalEmailsApi(
+        new \GuzzleHttp\Client(), $config
+    );
+    $verifyUrl = \URL::temporarySignedRoute(
+        'verification.verify',
+        now()->addMinutes(60),
+        ['id' => $user->id, 'hash' => sha1($user->email)]
+    );
+    $api->sendTransacEmail(new \SendinBlue\Client\Model\SendSmtpEmail([
+        'subject'     => 'Verify your email - ' . config('app.name'),
+        'htmlContent' => '<p>Click the link below to verify your email:</p><a href="' . $verifyUrl . '">Verify Email</a>',
+        'sender'      => ['name' => config('app.name'), 'email' => config('mail.from.address')],
+        'to'          => [['email' => $user->email, 'name' => $user->name]],
+    ]));
+} catch (\Exception $e) {
+    \Log::error('Brevo email failed: ' . $e->getMessage());
+}
         if ($user->role === 'student') {
             Student::create([
                 'user_id'    => $user->id,
