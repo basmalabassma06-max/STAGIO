@@ -247,41 +247,51 @@ class StudentController extends Controller
     // ================= MATCHING ================= (unchanged)
 
     public function advancedRecommended(Request $request)
-    {
-        $student = $this->student();
-        $skills  = $student->skills()->pluck('skills.id');
+{
+    $student = $this->student();
+    $skills  = $student->skills()->pluck('skills.id');
 
-        $offers = Offer::with('company', 'skills')
-            ->where('is_active', true)
-            ->where(function ($q) {
-                $q->whereNull('deadline')->orWhere('deadline', '>', now());
-            })
-            ->get();
+    $offers = Offer::with(['company', 'skills'])
+        ->where('is_active', true)
+        ->where(function ($q) {
+            $q->whereNull('deadline')->orWhere('deadline', '>', now());
+        })
+        ->get();
 
-        $scored = $offers->map(function ($o) use ($skills, $student) {
-            $offerSkills   = $o->skills->pluck('id');
-            $skillsMatch   = $offerSkills->intersect($skills)->count();
-            $skillsScore   = $offerSkills->count() > 0
-                ? ($skillsMatch / $offerSkills->count()) * 60 : 0;
-            $locationScore = ($o->wilaya === $student->wilaya) ? 20 : 0;
-            $typeScore     = ($o->type === 'internship') ? 20 : 10;
-            $o->score      = round($skillsScore + $locationScore + $typeScore);
-            return $o;
-        });
+    $scored = $offers->map(function ($o) use ($skills, $student) {
+        $offerSkills = $o->skills->pluck('id');
+        
+        // ✅ Skills
+        if ($offerSkills->count() > 0 && $skills->count() > 0) {
+            $skillsMatch = $offerSkills->intersect($skills)->count();
+            $skillsScore = ($skillsMatch / $offerSkills->count()) * 60;
+        } else {
+            $skillsScore = 0;
+        }
 
-        $sorted  = $scored->sortByDesc('score')->values();
-        $page    = request()->get('page', 1);
-        $perPage = 10;
+        // ✅ Location
+        $locationScore = ($o->location === $student->wilaya) ? 20 : 0;
 
-        $paginated = new \Illuminate\Pagination\LengthAwarePaginator(
-            $sorted->forPage($page, $perPage),
-            $sorted->count(),
-            $perPage,
-            $page
-        );
+        // ✅ Type
+        $typeScore = ($o->type === 'internship') ? 20 : 10;
 
-        return $this->success($paginated);
-    }
+        $o->score = round($skillsScore + $locationScore + $typeScore);
+        return $o;
+    });
+
+    $sorted  = $scored->sortByDesc('score')->values();
+    $page    = $request->get('page', 1);
+    $perPage = 10;
+
+    $paginated = new \Illuminate\Pagination\LengthAwarePaginator(
+        $sorted->forPage($page, $perPage),
+        $sorted->count(),
+        $perPage,
+        $page
+    );
+
+    return $this->success($paginated);
+}
 
     // ================= APPLICATION =================
     // ── CHANGED: `if (!$s->cv)` → `if (!$s->hasDigitalCv())` ──
